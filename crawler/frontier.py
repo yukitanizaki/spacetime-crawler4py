@@ -3,11 +3,11 @@ import shelve
 
 from threading import Thread, RLock
 from queue import Queue, Empty
-
+from urllib.parse import urlpars
 from utils import get_logger, get_urlhash, normalize
-from scraper import is_valid, scraper
+from scraper import is_valid
 
-class Frontier(object):
+class Frontier:
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
         self.config = config
@@ -15,6 +15,10 @@ class Frontier(object):
         self.to_be_downloaded = Queue() #queue instead of list
         self.url_map = {} #dict to keep urls
 
+        #tracking unique pages and uci.edu subdomains
+        self.unique_pages = set()
+        self.uci_subdomains = set()
+        
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
             self.logger.info(
@@ -82,6 +86,12 @@ class Frontier(object):
             self.save[urlhash] = (url, True)
             self.save.sync()
 
+            self.unique_pages.add(url) #track unique pages
+
+            parsed = urlparse(url) #track uci.edu subdomains
+            if parsed.hostname and parsed.hostname.endswith(".uci.edu"):
+                self.uci_subdomains.add(parsed.hostname)
+    
     def mark_url_invalid(self, url):
         urlhash = get_urlhash(url) #get hash
         with self.lock: #lock so only one thread access
@@ -89,3 +99,10 @@ class Frontier(object):
             self.save[urlhash] = (url, True)
             self.save.sync()
 
+    def print_summary(self):
+        print("\nCrawl Summary Report")
+        print("--------------------")
+        print(f"Total unique pages found: {len(self.unique_pages)}")
+        print(f"Total unique subdomains in uci.edu domain: {len(self.uci_subdomains)}")
+        for subdomain in sorted(self.uci_subdomains):
+            print(subdomain)
