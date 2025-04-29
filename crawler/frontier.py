@@ -1,9 +1,8 @@
 import os
 import shelve
-
-from threading import Thread, RLock
+from threading import RLock
 from queue import Queue, Empty
-from urllib.parse import urlpars
+from urllib.parse import urlparse
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
 
@@ -11,91 +10,91 @@ class Frontier:
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
         self.config = config
-        self.lock = RLock() #to lock urls
-        self.to_be_downloaded = Queue() #queue instead of list
-        self.url_map = {} #dict to keep urls
+        self.lock = RLock()
 
-        #tracking unique pages and uci.edu subdomains
+        self.to_be_downloaded = Queue()
+        self.url_map = {}
+
+        # Tracking unique pages and uci.edu subdomains
         self.unique_pages = set()
-        self.uci_subdomains = set()
-        
+        self.uci_subdomains = {}
+
         if not os.path.exists(self.config.save_file) and not restart:
-            # Save file does not exist, but request to load save.
-            self.logger.info(
-                f"Did not find save file {self.config.save_file}, "
-                f"starting from seed.")
+            self.logger.info(f"Did not find save file {self.config.save_file}, starting from seed.")
         elif os.path.exists(self.config.save_file) and restart:
-            # Save file does exists, but request to start from seed.
-            self.logger.info(
-                f"Found save file {self.config.save_file}, deleting it.")
+            self.logger.info(f"Found save file {self.config.save_file}, deleting it.")
             os.remove(self.config.save_file)
-        # Load existing save file, or create one if it does not exist.
+
         self.save = shelve.open(self.config.save_file)
 
         if restart:
             for url in self.config.seed_urls:
                 self.add_url(url)
         else:
-            # Set the frontier state with contents of save file.
             self._parse_save_file()
             if not self.save:
                 for url in self.config.seed_urls:
                     self.add_url(url)
 
     def _parse_save_file(self):
-        ''' This function can be overridden for alternate saving techniques. '''
         total_count = len(self.save)
         tbd_count = 0
-        with self.lock: #lock so only one thread access
+        with self.lock:
             for urlhash in self.save:
-                url, visited = self.save[urlhash] #access urls in save dict
-                self.url_map[urlhash] = (url, visited) #update url and visited status
+                url, visited = self.save[urlhash]
+                self.url_map[urlhash] = (url, visited)
                 if not visited and is_valid(url):
-                    self.to_be_downloaded.put(url) #add to queue
+                    self.to_be_downloaded.put(url)
                     tbd_count += 1
-        self.logger.info(
-            f"Found {tbd_count} urls to be downloaded from {total_count} "
-            f"total urls discovered.")
+        self.logger.info(f"Found {tbd_count} URLs to be downloaded from {total_count} total.")
 
     def get_tbd_url(self):
         try:
-            with self.lock: #lock so only one thread access
-                return self.to_be_downloaded.get_nowait() #retreive url from queue without blocking
+            with self.lock:
+                return self.to_be_downloaded.get_nowait()
         except Empty:
+            self.logger.info("No URL to download. Worker might be idle or done.")
             return None
 
     def add_url(self, url):
         url = normalize(url)
         urlhash = get_urlhash(url)
-        with self.lock: #lock so only one thread access
+        with self.lock:
             if urlhash not in self.url_map:
-                self.url_map[urlhash] = (url, False) #update url and visited status
+                self.url_map[urlhash] = (url, False)
                 self.save[urlhash] = (url, False)
                 self.save.sync()
-                self.to_be_downloaded.put(url) #add to queue
+                self.to_be_downloaded.put(url)
 
     def mark_url_complete(self, url):
+        url = normalize(url)
         urlhash = get_urlhash(url)
-        with self.lock: #lock so only one thread access
+        with self.lock:
             if urlhash not in self.url_map:
-                # This should not happen.
-                self.logger.error(
-                    f"Completed url {url}, but have not seen it before.")
-                
-            self.url_map[urlhash] = (url, True) #update url and visited status
+                self.logger.error(f"Completed URL {url}, but have not seen it before.")
+            self.url_map[urlhash] = (url, True)
             self.save[urlhash] = (url, True)
             self.save.sync()
-
-            self.unique_pages.add(url) #track unique pages
-
-            parsed = urlparse(url) #track uci.edu subdomains
-            if parsed.hostname and parsed.hostname.endswith(".uci.edu"):
-                self.uci_subdomains.add(parsed.hostname)
     
+            # Track unique pages (without fragment)
+            self.unique_pages.add(url)
+    
+            # Track subdomains
+            parsed = urlparse(url)
+            if parsed.hostname and parsed.hostname.endswith(".uci.edu"):
+                self.uci_subdomains[parsed.hostname] = self.uci_subdomains.get(parsed.hostname, 0) + 1
+    
+            self.completed_count = getattr(self, 'completed_count', 0) + 1
+            if self.completed_count % 50 == 0:
+                self.logger.info(f"{self.completed_count} URLs completed so far.")
+    
+            # Print summary report after each URL
+            self.print_summary()
+
     def mark_url_invalid(self, url):
-        urlhash = get_urlhash(url) #get hash
-        with self.lock: #lock so only one thread access
-            self.url_map[urlhash] = (url, True) #update url and visited status
+        urlhash = get_urlhash(url)
+        with self.lock:
+            self.url_map[urlhash] = (url, True)
             self.save[urlhash] = (url, True)
             self.save.sync()
 
@@ -103,6 +102,14 @@ class Frontier:
         print("\nCrawl Summary Report")
         print("--------------------")
         print(f"Total unique pages found: {len(self.unique_pages)}")
-        print(f"Total unique subdomains in uci.edu domain: {len(self.uci_subdomains)}")
+
+        from scraper import largestPageWordCount, get_top_50_words
+
+        print(f"\nLongest page (by word count): {largestPageWordCount[0]} ({largestPageWordCount[1]} words)")
+        print("\nTop 50 most common words (excluding stopwords):")
+        for word, count in get_top_50_words():
+            print(f"{word}: {count}")
+
+        print("\nUnique subdomains in uci.edu:")
         for subdomain in sorted(self.uci_subdomains):
-            print(subdomain)
+            print(f"{subdomain}, {self.uci_subdomains[subdomain]}")
