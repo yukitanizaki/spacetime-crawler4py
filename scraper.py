@@ -50,7 +50,7 @@ all_words = {}  # dict to store all word frequencies across crawled pages
 ICS_subdomains = {}  # track frequency of each ICS subdomain visited
 robot_parsers = {}  # caches parsed robots.txt rules per domain
 crawl_delays = {}  # stores crawl delays from robots.txt per domain
-largestPageWordCount = ("", 0)  # tracks largest page by word count (url, count)
+_largestPageWordCount = ("", 0)  # tracks largest page by word count (url, count)
 
 # Main scraper
 def scraper(url, resp): # main scraper function
