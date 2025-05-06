@@ -107,7 +107,9 @@ class Frontier:
         print(f"Total unique pages found: {len(self.unique_pages)}")
         print(f"Total unique subdomains in uci.edu domain: {len(self.uci_subdomains)}")
         print(url)
-        print(sorted(self.uci_subdomains))
+        # print(sorted(self.uci_subdomains))
+        for subdomain in sorted(self.domain_count.keys()):
+            print(f"{subdomain}, {self.domain_count[subdomain]}")
         elapsed_time = time.time() - self.start_time
         urls_per_second = self.crawled_urls / elapsed_time if elapsed_time > 0 else 0
         print(f"URLs crawled per second: {urls_per_second:.2f}")
@@ -118,7 +120,9 @@ class Frontier:
         print("--------------------")
         print(f"Total unique pages found: {len(self.unique_pages)}")
         print(f"Total unique subdomains in uci.edu domain {len(self.uci_subdomains)}")
-        print(sorted(self.uci_subdomains))
+        # print(sorted(self.uci_subdomains))
+        for subdomain in sorted(self.domain_count.keys()):
+            print(f"{subdomain}, {self.domain_count[subdomain]}")
         longest_page_url, longest_page_words = get_largest_page()
         print(f"Longest page: {longest_page_url} with {longest_page_words} words")
 
